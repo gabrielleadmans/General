@@ -1,3 +1,5 @@
+# TODO:
+# - accept user input
 
 # (very fragile) code to clean up output file from FlexStation.
 #input a csv and output a better one
