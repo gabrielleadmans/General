@@ -1,56 +1,80 @@
 #!/usr/bin/python3
+"""
+Grab a bunch of pickle files at a search path, and write a CSV summary row for each one
 
-### this code takes a .pkl ('pickle') file from AlphaFold2 and extracts the confidence values
-### pLDDT, pTM and ipTM, and stores them in a csv file
-### the pickle file contains a nested dictionary of the various NumPy arrays produced by the model
-### as well as the confidence measures. pTM and ipTM are a single number (ipTM only for multimers) 
-### pLDDT is per residue we average it
+Requires python3.11 or greater
+"""
 
-from pathlib import Path
-import pandas as pd
-import pickle as pkl
-import numpy as np
-import os
-
-file_path = Path("/Users/gabrielleadmans/Documents/_11 Computational/2023-12-29_Good_AF_SnC2_models/")
-file_names = []
-
-pldtt_list = []
-iptm_list = []
-ptm_list = []
-
-# Here we loop over files in the directory (file path)
-
-for file_name in os.listdir(file_path):
-    if file_name.endswith(".pkl"):      #looking only at pickle files
-        file_names.append(file_name)
-        with open(file_path / file_name, "rb") as f:
-            object = pkl.load(f)
-
-        print(type(object))             #showing the content of the dictionaries, optional
-
-        #here we look for our three values of interest: plddt, ptm and iptm and add them to lists
-        print(object.keys())
-        for k, v in object.items():
-            print(k, " ", type(v))
-            if k == "plddt":
-                print(v)
-                print(np.mean(v))
-                pldtt_list.append(np.mean(v))
-            elif k == "iptm":
-                print(v)
-                iptm_list.append(v)
-            elif k == "ptm":
-                print(v)
-                ptm_list.append(v)
-
-
-#getting the date for output file name
+import logging
+import pickle
+from dataclasses import dataclass
 from datetime import datetime
-date = datetime.today().strftime('%Y-%m-%d')
-print (date)
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from pydantic import TypeAdapter
+from typing_extensions import NotRequired, TypedDict
 
 
-#now we save our values to a csv file
-df = pd.DataFrame({"pLDDT": pldtt_list, "ipTM": iptm_list, "pTM": ptm_list}, index=file_names)
-df.to_csv(file_path/f"{date}_AF_confidence_values.csv", index_label="model_name")
+@dataclass(frozen=True)
+class Parsed:
+    """A row of the final table CSV, constructed from each file"""
+
+    model_name: str
+    pLDDT: float
+    """averaged"""
+    ipTM: float | None
+    """only present for multimers"""
+    pTM: float
+
+
+class Raw(TypedDict):
+    """The expected format on disk, used for validation"""
+
+    plddt: list[float]
+    """per-residue"""
+    iptm: NotRequired[float]  # TODO(aatifsyed): is this right?
+    """only present for multimers"""
+    ptm: float
+
+
+def load_and_parse(file: Path) -> Parsed:
+    """Read a file in, validate the data and return it"""
+
+    raw = pickle.loads(file.read_bytes())
+    logging.debug(f"{raw=}")
+    validated = TypeAdapter(Raw).validate_python(raw)
+    parsed = Parsed(
+        model_name=file.name,
+        pLDDT=np.mean(validated["plddt"]),
+        ipTM=validated.get("iptm", None),
+        pTM=validated["ptm"],
+    )
+    logging.debug(f"{parsed=}")
+    return parsed
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
+    # Expected to be run from editor, so hardcode input and output
+    search_folder = Path(
+        "/Users/gabrielleadmans/Documents/_11 Computational/2023-12-29_Good_AF_SnC2_models/"
+    )
+    output_file = search_folder.joinpath(
+        f"{datetime.today().strftime('%Y-%m-%d')}_AF_confidence_values.csv"
+    )
+
+    all_rows = []
+    for file in filter(
+        Path.is_file,  # `Path.glob` can returns files AND folders, which could break our code, so `filter` to only include files
+        search_folder.glob("*.pkl"),  # we could make this recursive if required
+    ):
+        logging.info(f"reading file: {file}")
+        parsed = load_and_parse(file)
+        all_rows.append(parsed)
+
+    pd.DataFrame(all_rows).set_index("model_name").to_csv(
+        output_file
+    )  # this gives us the CSV headers for free
