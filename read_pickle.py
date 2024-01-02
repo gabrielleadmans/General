@@ -44,6 +44,13 @@ for file_name in os.listdir(file_path):
                 print(v)
                 ptm_list.append(v)
 
+
+#getting the date for output file name
+from datetime import datetime
+date = datetime.today().strftime('%Y-%m-%d')
+print (date)
+
+
 #now we save our values to a csv file
-df = pd.DataFrame({"pldtt": pldtt_list, "iptm": iptm_list, "ptm": ptm_list}, index=file_names)
-df.to_csv(file_path/'file.csv', index_label="name")
+df = pd.DataFrame({"pLDDT": pldtt_list, "ipTM": iptm_list, "pTM": ptm_list}, index=file_names)
+df.to_csv(file_path/f"{date}_AF_confidence_values.csv", index_label="model_name")
