@@ -2,7 +2,7 @@
 """
 Grab a bunch of pickle files at a search path, and write a CSV summary row for each one
 
-Requires python3.11 or greater
+Requires a pretty recent python
 """
 
 import logging
@@ -10,11 +10,14 @@ import pickle
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from pydantic import TypeAdapter
 from typing_extensions import NotRequired, TypedDict
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -39,20 +42,26 @@ class Raw(TypedDict):
     ptm: float
 
 
-def load_and_parse(file: Path) -> Parsed:
-    """Read a file in, validate the data and return it"""
+def parse_from_file(file: Path) -> Parsed:
+    """Read a file in, validate the data and return it, with appropriate logging"""
 
     raw = pickle.loads(file.read_bytes())
-    logging.debug(f"{raw=}")
+    logger.debug(f"{raw=}")
+    parsed = parse_raw(model_name=file.name, raw=raw)
+    logger.debug(f"{parsed=}")
+    return parsed
+
+
+def parse_raw(model_name: str, raw: Any) -> Parsed:
     validated = TypeAdapter(Raw).validate_python(raw)
-    parsed = Parsed(
-        model_name=file.name,
-        pLDDT=np.mean(validated["plddt"]),
+    return Parsed(
+        model_name=model_name,
+        pLDDT=np.mean(
+            validated["plddt"]
+        ),  # TODO(aatifsyed): how should we handle an empty list?
         ipTM=validated.get("iptm", None),
         pTM=validated["ptm"],
     )
-    logging.debug(f"{parsed=}")
-    return parsed
 
 
 if __name__ == "__main__":
@@ -71,10 +80,16 @@ if __name__ == "__main__":
         Path.is_file,  # `Path.glob` can returns files AND folders, which could break our code, so `filter` to only include files
         search_folder.glob("*.pkl"),  # we could make this recursive if required
     ):
-        logging.info(f"reading file: {file}")
-        parsed = load_and_parse(file)
+        logger.info(f"reading file: {file}")
+        parsed = parse_from_file(file)
         all_rows.append(parsed)
 
     pd.DataFrame(all_rows).set_index("model_name").to_csv(
         output_file
     )  # this gives us the CSV headers for free
+
+
+def test():
+    assert parse_raw("sample", {"plddt": [2], "ptm": 1}) == Parsed(
+        "sample", 2.0, None, 1
+    )
